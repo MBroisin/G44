@@ -1,101 +1,129 @@
-#include "ch.h"
-#include "hal.h"
-#include <main.h>
-#include <usbcfg.h>
-#include <chprintf.h>
-#include <leds.h>
-#include <main.h>
+#include <ch.h>
+#include <arm_math.h>
 #include <motors.h>
-#include <fft.h>
-#include <rotation.h>
-#include <sensors/VL53L0X/VL53L0X.h>
 
-#define MIN_VALUE_THRESHOLD	10000 
+#include "macros.h"
+#include "main.h"
+#include "path_planning.h"
+#include "obstacles.h"
 
-#define PAUSE 			1000 //thread pause of 1000ms
-#define DIST_OBJ 100 //en mm = 10cm
-#define COEF 80 // nombre de 'step' par centimètre 
+#define MOTOR_SPEED_CRUISE 700
+#define PAUSE 1100 //pause between turns of 1s
+#define PERIOD 100 //thread period of 100ms
+#define DIST_OBJ 0.05 //min distance before turning, in m
+#define TURN_SPEED 100
 
-Int p ;
-p=0;
+static THD_WORKING_AREA(path_planning_thd_wa, 256);
+static THD_FUNCTION(path_planning_thd, arg);
 
-Void turn (double angle, bool i){ //I=0 -> tourne droite, 1 ->gauche
-	
-	//right_motor_set_speed(300);
-	//left_motor_set_speed(-300);
+//i=0 -> tourne droite, 1 ->gauche
+void turn(float angle)
+{
+	bool negative = angle < 0;
+	if(negative) angle *= -1;
 
 	right_motor_set_speed(0);
 	left_motor_set_speed(0);
 
-	left_motor_set_pos(0); 
-	right_motor_set_pos(0);//place la position des roues du robot à (0;0)
-	if (i==0){
-		right_motor_set_speed(-300); //TOURNE A DROITE
-		left_motor_set_speed(300);
-		while(left_motor_get_pos()<(COEF*(15.7*angle)/360)){ 
+	//place la position des roues du robot à (0;0)
+	left_motor_set_pos(0);
+	right_motor_set_pos(0);
+	if(negative)//TOURNE A DROITE
+	{
+		right_motor_set_speed(-TURN_SPEED);
+		left_motor_set_speed(TURN_SPEED);
+		while(left_motor_get_pos() < MTOSTEP(PI*WHEEL_TRACK*angle/360))
+		{
 			chThdSleepMilliseconds(10);
 		}
-		 break;
 	}
-	else{	
-		right_motor_set_speed(300);//TOURNE A GAUCHE
-		left_motor_set_speed(-300);
-		while(right_motor_get_pos()<(COEF*(15.7*angle)/360)){
+	else//TOURNE A GAUCHE
+	{
+		right_motor_set_speed(TURN_SPEED);
+		left_motor_set_speed(-TURN_SPEED);
+		while(right_motor_get_pos() < MTOSTEP(PI*WHEEL_TRACK*angle/360))
+		{
 			chThdSleepMilliseconds(10);
 		}
-		 break;
 	}
-	right_motor_set_speed(0);
-	left_motor_set_speed(0);
-	right_motor_set_speed(MOTOR_SPEED_LIMIT*0.8);
-	left_motor_set_speed(MOTOR_SPEED_LIMIT*0.8);
+	right_motor_set_speed(MOTOR_SPEED_CRUISE);
+	left_motor_set_speed(MOTOR_SPEED_CRUISE);
 }
-        //time = chVTGetSystemTime(); 
 
-
-        //MODIFIER
-        //f_mode = get_mode();
-
-        //distance_TOF is updated by VL53L0X TOF library //OUI
-        distance_TOF = VL53L0X_get_dist_mm();
-
-        //computes the speed to give to the motors
-        //speed = pi_regulator_distance((float)distance_TOF*CM, DIST_PLAY*CM);
-
-        //float angle = get_angle();
-        //computes a correction factor to let the robot rotate to be aligned with the sound source
-        //speed_correction = pi_regulator_angle(angle, 0); 
-While (1){
-	if(distance_TOF >= DIST_OBJ){
-		right_motor_set_speed(MOTOR_SPEED_LIMIT*0.8);
-		left_motor_set_speed(MOTOR_SPEED_LIMIT*0.8);
+void init_path_planning(uint8_t mode)
+{
+	motors_init();
+	//even mode means no turn (because accelerometer is currently a bit
+	//unstable with rotations)
+	if(mode%2)
+	{
+		right_motor_set_speed(MOTOR_SPEED_CRUISE);
+		left_motor_set_speed(MOTOR_SPEED_CRUISE);
 	}
-	else{
-		if (p%2==0){
-			turn(90,0);//fonction, arrête le robot, tourne de 90 degrés droite, robot reprend sa vitesse
-
-			if(distance_TOF >= DIST_OBJ){
-				chThdSleepMilliseconds(1000);//attend 1seconde (il avance pendant 1 seconde)
-				turn(90,0);		
-			}
-			else {
-				turn(90,0);
-			}
-		
-		else {
-			turn(90,1);//fonction, arrête le robot, tourne de 90 degrés gauche, robot reprend sa vitesse
-
-			if(distance_TOF >= DIST_OBJ){
-				chThdSleepMilliseconds(1000);
-				turn(90,1);		
-			}
-			else {
-				turn(90,1);
-			}
-		p++
-
-		}
+	else
+	{
+		chThdCreateStatic(path_planning_thd_wa, sizeof(path_planning_thd_wa),
+			NORMALPRIO, path_planning_thd, NULL);
 	}
 }
 
-	break;
+static THD_FUNCTION(path_planning_thd, arg)
+{
+	(void) arg;
+	chRegSetThreadName(__FUNCTION__);
+
+	uint8_t p = 0;
+	wait_first_obstacle(); //We wait the first time but not anymore afterwards
+	while(chThdShouldTerminateX() == false)
+	{
+		systime_t time = chVTGetSystemTime();
+
+		float distance_TOF = get_obstacles()->front;
+
+		bool collision = (distance_TOF < DIST_OBJ)
+		       	      || get_obstacles()->frontLeft1
+		       	      || get_obstacles()->frontLeft2
+		       	      || get_obstacles()->frontRight1
+		       	      || get_obstacles()->frontRight2;
+
+		if(!collision)
+		{
+			right_motor_set_speed(MOTOR_SPEED_CRUISE);
+			left_motor_set_speed(MOTOR_SPEED_CRUISE);
+			chThdSleepUntilWindowed(time, time + MS2ST(PERIOD));
+		}
+		else
+		{
+			if (p%2==0)
+			{
+				turn(-90);//90° right
+				distance_TOF = get_obstacles()->front;
+				if(distance_TOF >= DIST_OBJ)
+				{
+					chThdSleepMilliseconds(PAUSE);
+					turn(-90);
+				}
+				else
+				{
+					turn(-90);
+				}
+				p++;
+			}
+			else
+			{
+				turn(90);//90° left
+				distance_TOF = get_obstacles()->front;
+				if(distance_TOF >= DIST_OBJ)
+				{
+					chThdSleepMilliseconds(PAUSE);
+					turn(90);
+				}
+				else
+				{
+					turn(90);
+				}
+				p++;
+			}
+		}
+	}
+}

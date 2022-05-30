@@ -1,17 +1,20 @@
-#include <main.h> 
-#include <chprintf.h>
-#include <serial_comm.h>
 #include <string.h>
+
+#include <ch.h>
+
+#include <serial_comm.h>
 
 #include "comm.h"
 #include "localization.h"
 #include "obstacles.h"
 
+#define COMM_PERIOD 100 //ms
+
 static THD_WORKING_AREA(comm_thd_wa, 512);
 static THD_FUNCTION(comm_thd, arg);
 
 //From TP4
-static void SendUint8ToComputer(uint8_t* data, uint16_t size) 
+static void SendUint8ToComputer(uint8_t* data, uint16_t size)
 {
 	chSequentialStreamWrite((BaseSequentialStream *)&SD3, (uint8_t*)"START", 5);
 	chSequentialStreamWrite((BaseSequentialStream *)&SD3, (uint8_t*)&size, sizeof(uint16_t));
@@ -32,10 +35,8 @@ static THD_FUNCTION(comm_thd, arg)
 
 	while(chThdShouldTerminateX() == false)
 	{
+		wait_obstacle_ready();
 		systime_t time = chVTGetSystemTime();
-
-		binary_semaphore_t* obstacle_sem = get_obstacle_sem();
-		chBSemWait(obstacle_sem);
 
 		const obstacle_t* obstacles = get_obstacles();
 		const float* position = get_position();
@@ -48,10 +49,10 @@ static THD_FUNCTION(comm_thd, arg)
 		uint8_t bytes[size_position+size_orientation+size_obstacles] = {0};
 
 		memcpy(bytes, position, size_position);
-		memcpy(bytes + size_position, orientation, size_position);
+		memcpy(bytes + size_position, orientation, size_orientation);
 		memcpy(bytes + size_position + size_orientation, &(obstacles->front), sizeof(float));
 		//We'll pack the bools in a byte
-		bytes[size_position+size_orientation+sizeof(float)] = obstacles->frontRight1 
+		bytes[size_position+size_orientation+sizeof(float)] = obstacles->frontRight1
 														+ (obstacles->frontRight2 << 1)
 														+ (obstacles->right << 2)
 														+ (obstacles->rearRight << 3)
@@ -61,6 +62,6 @@ static THD_FUNCTION(comm_thd, arg)
 														+ (obstacles->frontLeft1 << 7);
 		SendUint8ToComputer(bytes, sizeof(bytes));
 
-		chThdSleepUntilWindowed(time, time + MS2ST(100));
+		chThdSleepUntilWindowed(time, time + MS2ST(COMM_PERIOD));
 	}
 }

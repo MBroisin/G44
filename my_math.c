@@ -1,4 +1,3 @@
-#include <main.h>
 #include "my_math.h"
 
 #include <arm_math.h>
@@ -55,3 +54,4 @@ void normalize_matrix33(float* mat)
 	doGramSchmidtVec3(mat+3, mat+2*3);
 	normalize_vec3(mat+2*3);
 }
+

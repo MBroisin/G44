@@ -1,8 +1,9 @@
 #ifndef ROTATION_H
 #define ROTATION_H
 
-Void turn (int angle, bool i);
+#include <ch.h>
+
+void init_path_planning(uint8_t mode);
+void turn(float angle);
 
 #endif /* ROTATION_H */
-
-

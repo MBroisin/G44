@@ -1,7 +1,7 @@
 #ifndef OBSTACLE_H
 #define OBSTACLE_H
 
-#include <main.h>
+#include <ch.h>
 
 typedef struct
 {
@@ -22,8 +22,9 @@ typedef struct
 } obstacle_t;
 
 const obstacle_t* get_obstacles(void);
-binary_semaphore_t* get_obstacle_sem(void);
 
+void wait_first_obstacle(void);
+void wait_obstacle_ready(void);
 void obstacle_init(void);
 
 #endif //OBSTACLE_H

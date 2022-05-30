@@ -1,7 +1,7 @@
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
 #include <math.h>
 
 //ChibiOS includes
@@ -13,52 +13,20 @@
 #include <memory_protection.h>
 #include <msgbus/messagebus.h>
 #include <main.h>
-#include <motors.h>
-#include <serial_comm.h>
 
 //Local includes 
 #include "comm.h"
 #include "localization.h"
 #include "macros.h"
 #include "obstacles.h"
-#include <ch.h>
-#include <hal.h>
-#include <chprintf.h>
-#include <memory_protection.h>
-#include <usbcfg.h>
-#include <main.h>
-#include <motors.h>
-<<<<<<< Updated upstream
-=======
-#include <fft.h>
-#include <arm_math.h>
-#include <sensors/VL53L0X/VL53L0X.h>
+#include "path_planning.h"
+#include "selector.h"
 
-#define SEND_FROM_MIC
-
-static void serial_start(void)
-{
-	static SerialConfig ser_cfg = {
-	    115200,
-	    0,
-	    0,
-	    0,
-	};
-
-	sdStart(&SD3, &ser_cfg); // UART3.
-}
-
-#define STACK_CHK_GUARD 0xe2dee396
-uintptr_t __stack_chk_guard = STACK_CHK_GUARD;
-
-void __stack_chk_fail(void)
-{
-    chSysHalt("Stack smashing detected");
-}
-====
 messagebus_t bus; //declare in main.h, but defined here
 MUTEX_DECL(bus_lock);
 CONDVAR_DECL(bus_condvar);
+
+
 
 int main(void)
 {
@@ -69,27 +37,20 @@ int main(void)
 
 	messagebus_init(&bus, &bus_lock, &bus_condvar);
 
-	serial_start();
+	uint8_t mode = get_selector();
 
-	localization_init();
+	comm_init();
+	localization_init(mode);
 	obstacle_init();
-	/* comm_init(); */
-	motors_init();
+	init_path_planning(mode);
 
 	//Make the main thread sleep
+	while(1)
+	{
+		chThdSleepSeconds(1);
+	}
 
-        //inits the motors
-   	 motors_init();
-
-   	 //starts the TOF 
-   	 VL53L0X_start();
-
-
-    /* Infinite loop. */
-    while (1) {
-        //waits 1 second
-        chThdSleepMilliseconds(1000);
-    }
+	return 0;
 }
 
 #define STACK_CHK_GUARD 0xe2dee396
